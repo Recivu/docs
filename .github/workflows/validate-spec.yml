@@ -1,0 +1,41 @@
+# Primo workflow di api-docs (TECH-893), spostato in docs con la migrazione a
+# Mintlify. Mintlify builda e pubblica a ogni push su main: un errore nella
+# spec o nell'MDX ferma il deploy, ma il resto (versione non allineata,
+# changelog.mdx non rigenerato) passerebbe in silenzio. Il check e' bloccante
+# solo sulla PR, e perche' lo sia davvero `validate-spec` va messo fra i
+# required check della branch protection di main. Sul push resta come segnale.
+name: validate-spec
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Lint openapi.yaml (Redocly)
+        run: npx -y @redocly/cli@1 lint openapi.yaml --format=github-actions
+
+      - name: Versione spec = ultima release del changelog
+        run: scripts/ci/check-version-sync.sh openapi.yaml CHANGELOG.md
+
+      - name: changelog.mdx rigenerato da CHANGELOG.md
+        run: node scripts/gen-changelog.mjs --check
+
+      - name: Build Mintlify
+        run: npx -y mint@4 validate
+
+      - name: Link rotti
+        run: npx -y mint@4 broken-links

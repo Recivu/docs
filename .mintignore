@@ -5,3 +5,8 @@
 # Draft content
 drafts/
 *.draft.mdx
+
+# Repo tooling, not pages
+AGENTS.md
+scripts/
+redocly.yaml

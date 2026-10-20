@@ -1,20 +1,51 @@
 ---
 title: "Introduction"
-description: "Welcome to your project"
+description: "Turn Italian fiscal receipts into electronic invoices and recover the VAT."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+The Recivu API lets expense management platforms send the fiscal receipts (_scontrini_) their users collect to Recivu. Recivu negotiates with each merchant to have the receipt converted into an electronic invoice (_fattura elettronica_), so the company can recover the VAT (IVA) on the expense.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<Info>
+  Base URL: `https://api.recivu.it/v1`. The same URL serves the sandbox and production: the API key you send decides which one you hit.
+</Info>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## How an integration works
+
+<Steps>
+  <Step title="Register the company">
+    Call [`POST /company`](/api-reference/companies/register-a-new-company-to-recivu) for each customer of yours that wants to recover VAT. Pass a `webhook_url` to receive status updates, and store the `webhook_signing_secret` returned in the response.
+  </Step>
+  <Step title="Register its employees">
+    Call [`POST /employee`](/api-reference/employees/add-a-new-employee) for each person who submits receipts on behalf of the company.
+  </Step>
+  <Step title="Submit receipts">
+    Send each receipt with [`POST /receipt`](/api-reference/receipts/request-invoice-conversion-from-receipt): the image and the data you extracted from it. Keep the `receipt_id` you get back.
+  </Step>
+  <Step title="Follow the outcome">
+    Recivu calls your [webhook](/webhooks) when the conversion completes, fails, is reverted or turns out to be a duplicate. You can also poll [`GET /receipts/{id}`](/api-reference/receipts/request-the-status-related-to-a-conversion-request) at any time.
+  </Step>
+  <Step title="Download the invoice">
+    Once a receipt is `completed`, download the invoice PDF with [`GET /invoices_download/{id}`](/api-reference/receipts/download-invoice-pdf).
+  </Step>
+</Steps>
+
+## Start here
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/authentication">
+    Create your test and live API keys.
+  </Card>
+  <Card title="Sandbox" icon="flask" href="/sandbox">
+    Build and test the whole flow without touching production.
+  </Card>
+  <Card title="Webhooks" icon="bell" href="/webhooks">
+    Receive conversion outcomes and verify their signature.
+  </Card>
+  <Card title="Changelog" icon="clock-rotate-left" href="/changelog">
+    What changed in each version of the API.
+  </Card>
+</CardGroup>
+
+## Versioning
+
+The API follows [Semantic Versioning](https://semver.org). Breaking changes only ship in a new `MAJOR` version, with notice, so you can pin your integration to a `MAJOR` line. Every change is listed in the [changelog](/changelog), and breaking entries are tagged **BREAKING**.

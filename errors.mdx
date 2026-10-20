@@ -1,0 +1,38 @@
+---
+title: "Errors"
+description: "How the API reports errors and which ones are safe to retry."
+---
+
+Errors use standard HTTP status codes and a JSON body with two fields:
+
+```json
+{
+  "error_code": 400,
+  "error_message": "Invalid VAT number format"
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `error_code` | integer | The HTTP status code of the response |
+| `error_message` | string | A human-readable description of the problem |
+
+Branch on the HTTP status. Use `error_message` for logs and to tell cases apart where the reference documents it, for example the two kinds of `404` on `GET /invoices_download/{id}`.
+
+## Status codes
+
+| Status | Meaning | Retry? |
+| --- | --- | --- |
+| `400` | The request is malformed or fails validation. | No: fix the request. |
+| `401` | The API key is missing or invalid. | No |
+| `403` | The key cannot do this, for example a sandbox endpoint with a live key. | No |
+| `404` | The resource does not exist, or belongs to another partner. | No |
+| `409` | Conflict with an existing resource, for example a company already registered. The body often carries the id of the existing resource. | No |
+| `429` | [Rate limit](/rate-limiting) exceeded. The request had no effect. | Yes, after `Retry-After` |
+| `5XX` | Temporary error on our side. | Yes, with exponential backoff |
+
+Each endpoint lists its own responses in the **API reference** tab.
+
+## Retrying safely
+
+`POST /employee` accepts an `Idempotency-Key` header: requests carrying the same key create the employee only once. On the other endpoints, check whether the resource exists before resending a request that timed out. For example, a `409` on `POST /company` returns the `company_id` that already exists.

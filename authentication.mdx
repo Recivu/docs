@@ -1,0 +1,36 @@
+---
+title: "Authentication"
+description: "Authenticate every request with an API key in the x-api-key header."
+---
+
+Every request to the Recivu API carries an API key in the `x-api-key` header:
+
+```bash
+curl https://api.recivu.it/v1/receipts/rcp_abc123def \
+  -H "x-api-key: $RECIVU_API_KEY"
+```
+
+A request without a key, or with an unknown or revoked one, is rejected with `401`.
+
+## Test and live keys
+
+You create and revoke your keys from the **API keys** page of the [partner portal](https://partners.recivu.it). Each key belongs to one environment:
+
+| Key | Environment | What happens |
+| --- | --- | --- |
+| **Test** | Sandbox | Data is stored in an isolated sandbox. No merchant is contacted, no invoice is issued and no webhook fires on its own. See [Sandbox](/sandbox). |
+| **Live** | Production | Receipts are processed for real: merchants are contacted and invoices are issued. |
+
+The key alone decides the environment. The `type` field on `POST /receipt` and the `?type=Test` query parameter are deprecated and ignored, except where the reference says otherwise.
+
+<Tip>
+  Use a test key in the API playground of this site. The playground sends real requests to `https://api.recivu.it/v1`, and with a test key they stay in the sandbox.
+</Tip>
+
+## Keeping keys safe
+
+- Keep keys on your servers. Never ship them in a mobile app or in browser code.
+- Use a separate key per environment and per system, so you can revoke one without affecting the others.
+- If a key leaks, create a new one in the portal, deploy it, then revoke the old one.
+
+Test and live keys are [rate limited](/rate-limiting) separately.
