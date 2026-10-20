@@ -9,7 +9,7 @@ A [test API key](/authentication#test-and-live-keys) sends every request to an i
 
 | Endpoint | With a test key |
 | --- | --- |
-| `POST /company`, `POST /employee`, `POST /merchant` | Records are created in the sandbox only. |
+| `POST /company`, `POST /employee`, `POST /vehicle`, `POST /merchant` | Records are created in the sandbox only. |
 | `POST /receipt` | The receipt is stored in the sandbox and **no webhook fires on submission**. |
 | `GET /receipts/{id}` | Returns the sandbox receipt and its current status. |
 | `GET /invoices_download/{id}` | Always returns a mock PDF, for any id. |
