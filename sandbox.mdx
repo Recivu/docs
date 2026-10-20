@@ -1,0 +1,41 @@
+---
+title: "Sandbox"
+description: "Exercise your integration end to end with a test API key."
+---
+
+A [test API key](/authentication#test-and-live-keys) sends every request to an isolated sandbox. You call the same endpoints at the same base URL as in production, but nothing reaches a real merchant and no invoice is issued.
+
+## What behaves differently
+
+| Endpoint | With a test key |
+| --- | --- |
+| `POST /company`, `POST /employee`, `POST /merchant` | Records are created in the sandbox only. |
+| `POST /receipt` | The receipt is stored in the sandbox and **no webhook fires on submission**. |
+| `GET /receipts/{id}` | Returns the sandbox receipt and its current status. |
+| `GET /invoices_download/{id}` | Always returns a mock PDF, for any id. |
+| `POST /sandbox/receipts/{id}/trigger` | Fires a webhook for a sandbox receipt. Returns `403` with a live key. |
+
+## Simulate the outcome of a receipt
+
+In the sandbox you decide what happens to each receipt. After submitting it, fire the webhook you want to test, either from the partner portal or with [`POST /sandbox/receipts/{id}/trigger`](/api-reference/receipts/trigger-a-sandbox-webhook-event-test-only):
+
+```bash
+curl -X POST https://api.recivu.it/v1/sandbox/receipts/rcp_abc123def/trigger \
+  -H "x-api-key: $RECIVU_TEST_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"event": "completed"}'
+```
+
+The callback is signed and delivered to the company's `webhook_url` exactly like a live one, so your signature check and your handler run for real.
+
+- `event` picks the outcome: `completed`, `failed`, `reverted` or `duplicate`.
+- `count: 2` sends the same event twice, to test that your handler is idempotent.
+- Fire `completed` and then `reverted` on the same receipt to test a credit note.
+
+Sandbox `receipt.conversion.completed` callbacks carry mock `merchant_name`, `merchant_vat` and `recovered_vat` values.
+
+## Going live
+
+1. Create a live key in the partner portal.
+2. Register your companies and employees again with the live key: sandbox records do not exist in production.
+3. Switch the key in your configuration. Nothing else changes.

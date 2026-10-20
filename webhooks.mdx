@@ -1,0 +1,98 @@
+---
+title: "Webhooks"
+description: "Receive the outcome of each conversion and verify that it comes from Recivu."
+---
+
+When the status of a receipt changes, Recivu sends a `POST` request to the company's `webhook_url`. You set it when you register the company with `POST /company`, or later with `PUT /company/{id}`. A single receipt can override it with the `webhook_url` field of `POST /receipt`.
+
+## Events
+
+| Event | `status` | When |
+| --- | --- | --- |
+| `receipt.conversion.completed` | `completed` | The invoice was issued. Carries `recovered_vat`, `merchant_name` and `merchant_vat`. |
+| `receipt.conversion.failed` | `failed` | No invoice will be issued: the receipt is illegible or not a fiscal receipt, the merchant refused, the 12-day deadline passed, or the merchant is excluded. The reason is in `error`. |
+| `receipt.conversion.reverted` | `completed` | A credit note cancelled the invoice, after you rejected a delivered receipt. |
+| `receipt.conversion.duplicate` | `duplicate` | The receipt matched one already converted. `receipt_id`, `merchant_name` and `merchant_vat` refer to the **original** receipt. |
+
+`failed` and `duplicate` are delivered at most once per receipt. `error` is plain English meant to be shown to people: do not match on its text.
+
+```json Example payload
+{
+  "event": "receipt.conversion.completed",
+  "receipt_id": "rcp_abc123def",
+  "status": "completed",
+  "error": "",
+  "recovered_vat": 3.41,
+  "timestamp": "2024-08-22T15:45:00Z",
+  "merchant_name": "Supermarket ABC S.r.l.",
+  "merchant_vat": "IT98765432109"
+}
+```
+
+The full schema is in the API reference, under the callback of `POST /receipt`.
+
+## Verify the signature
+
+Every webhook carries an `x-recivu-signature` header: `sha256=` followed by the hex HMAC-SHA256 of the **raw request body**, keyed with the company's `webhook_signing_secret`.
+
+- Compute the HMAC over the raw body bytes, before any JSON parsing.
+- Compare with a constant-time function.
+- If the signature does not match, answer `403` and ignore the payload.
+
+<CodeGroup>
+
+```javascript Node.js
+import crypto from "node:crypto";
+
+// rawBody must be the unparsed Buffer, e.g. express.raw({ type: "application/json" }).
+export function isValidSignature(rawBody, signatureHeader, secret) {
+  const expected =
+    "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signatureHeader ?? "");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+```
+
+```python Python
+import hashlib
+import hmac
+
+
+def is_valid_signature(raw_body: bytes, signature_header: str, secret: str) -> bool:
+    expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature_header or "")
+```
+
+```go Go
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+)
+
+func isValidSignature(rawBody []byte, signatureHeader, secret string) bool {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(rawBody)
+	expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(expected), []byte(signatureHeader))
+}
+```
+
+</CodeGroup>
+
+If you lose the secret or suspect it leaked, generate a new one with [`POST /company/{id}/webhook-secret/rotate`](/api-reference/companies/rotate-the-webhook-signing-secret). The previous secret stops being valid the moment the call returns, so be ready to deploy the new one immediately.
+
+## Delivery and retries
+
+| Your response | What Recivu does |
+| --- | --- |
+| Any status below `400` | Delivery acknowledged. The response body is ignored. |
+| `5XX`, `429`, timeout (10 s), connection error | Retried, up to 4 attempts in total, with exponential backoff (1 s, 2 s, 4 s, capped at 8 s, with jitter). |
+| Any other `4XX` | Not retried. |
+
+Answer quickly and do the work asynchronously. Handle each event idempotently: the same event can reach you more than once.
+
+## If you miss a webhook
+
+[`GET /receipts/{id}`](/api-reference/receipts/request-the-status-related-to-a-conversion-request) returns the same information as the webhooks (`machine_status`, `merchant_name`, `merchant_vat`, `recovered_vat`), so you can recover a missed event by polling.

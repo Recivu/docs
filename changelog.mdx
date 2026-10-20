@@ -1,0 +1,191 @@
+---
+title: "Changelog"
+description: "Every change to the Recivu API, version by version."
+rss: true
+---
+
+{/* Generato da scripts/gen-changelog.mjs a partire da CHANGELOG.md: non modificare a mano. */}
+
+All notable changes to the Recivu API are documented on this page.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the API follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The current version is mirrored in `info.version` of `openapi.yaml`. Breaking changes are tagged **BREAKING** and only ship in a `MAJOR` bump — partners can pin to a `MAJOR` version line and expect no integration-breaking changes within it.
+
+<Update label="3.4.0" description="2026-09-19">
+
+### Added
+
+- `POST /company` and `PUT /company/{id}` now accept an optional `fiscal_code`: the codice fiscale of the owner, for a sole proprietorship or self-employed professional (partita IVA individuale), 16 uppercase alphanumeric characters. Omit it, or leave it empty, for a società. On `PUT /company/{id}`, omitting or emptying the field leaves the previously stored value unchanged. Callers that don't send it see no change in behavior.
+- The Company object returned by `GET /company/{id}` now includes `fiscal_code`, present only when one was set.
+- New optional field on `RegisterCompanyRequest`, `UpdateCompanyRequest`, and `GetCompanyResponse`.
+
+</Update>
+
+<Update label="3.3.0" description="2026-09-15">
+
+### Added
+
+- **Per-API-key rate limiting.** Requests are now metered with a token bucket per API key: up to **20 requests** of burst, refilling at **10 requests per second**. Test and live keys are metered separately. Requests over the limit are rejected with `429 Too Many Requests` **before being processed** — nothing is created, charged, or delivered — so a `429` is always safe to retry.
+  - Every metered response carries `RateLimit-Limit` (bucket capacity), `RateLimit-Remaining` (requests still available) and `RateLimit-Reset` (seconds until the bucket is full again), so you can pace yourself before being refused.
+  - A `429` additionally carries `Retry-After` with the whole number of seconds to wait; the body is the usual `{error_code, error_message}` shape. Retry no earlier than that, ideally with exponential backoff and jitter.
+  - `429` is documented on every endpoint. Integrations that already treat any non-2xx as retryable need no change; integrations that stopped only on 4xx should special-case `429` as retryable.
+  - If your integration has a legitimate peak above these values (a month-end bulk import, for instance), contact us and we will raise the limit for your key.
+
+- New **Merchants** endpoints for partners that onboard merchants delegating Recivu to issue electronic invoices on their behalf:
+  - `POST /merchant` registers a merchant's delegation (VAT number with control-digit validation, business name, address; optional `sdi`, `pec`, `email`, `phone`) and attributes it to the calling partner. Returns `201` with `vat_number` (canonical `IT`-prefixed form) and `delegated_at`. A merchant can only be delegated once: repeat attempts return `409`, including `delegated_at` only when the existing delegation belongs to the calling partner.
+  - `GET /merchant/{vat_number}` checks whether a merchant has already delegated Recivu — usable as a pre-check before registering. Always `200` for a valid VAT with `{vat_number, delegated}`; `delegated_at` is included only when the active delegation was registered by the calling partner.
+  - Test API keys register delegations in the sandbox only; no real merchant is affected.
+  - New schemas: `RegisterMerchantRequest`, `MerchantAddressRequest`, `RegisterMerchantResponse`, `DuplicateMerchantResponse`, `GetMerchantResponse`.
+
+### Fixed
+
+- **`GET /invoices_download/{id}` now returns the invoice PDF.** It only ever served the mock file for `?type=Test`; a live request answered `404 Invoice not found` even when the invoice had been issued, because the real download was never implemented. A live key now receives the PDF of the invoice issued for that receipt, as `application/pdf` with a `Content-Disposition: attachment` filename.
+  - The `404` is still there for the two cases that deserve it, told apart by `error_message`: `Receipt not found` (no such receipt for the calling partner, as on `GET /receipts/{id}`) and `No invoice file is associated with this receipt` (the receipt is yours but carries no invoice PDF — typically not converted yet).
+  - Test keys are unaffected: they still receive the mock PDF for any id, and `?type=Test` still does the same on a live key.
+
+### Changed
+
+- **`receipt.conversion.failed` now fires for every outcome that ends a conversion without an invoice**, not only for a staff archive: the negotiation with the merchant was unsuccessful, the receipt is past the 12-day deadline for issuing an electronic invoice, the merchant is excluded from conversion, or the document is not a fiscal receipt (POS slip, an invoice already). Previously a receipt closed in one of these states stayed silent and looked "in progress" forever to a partner relying on the callback. The event is delivered at most once per receipt; `error` carries the reason in plain English (see the `WebhookPayload` schema for the wordings) and is meant to be displayed, not matched on.
+
+  Not a schema change. Partners that were already handling `receipt.conversion.failed` need no code change; partners that ignored it should now treat it as the terminal negative outcome for a `receipt_id`. Receipts closed before this change that never received a callback are being notified once, retroactively, with the same event.
+
+- `merchant_name` now carries the merchant's **registered business name from the Italian Chamber of Commerce registry** (ragione sociale) instead of the name read off the receipt, as soon as the merchant's VAT number is matched against the registry. Affects the `receipt.conversion.*` webhook payloads and `GET /receipts/{id}`.
+
+  This is not a schema change — the field is still an optional string, and it is what these fields were already documented to return ("Ragione sociale of the merchant"). In practice a receipt prints the short trading name ("AUTOSTRADE"), so partners previously received that instead of the legal name ("AUTOSTRADE PER L'ITALIA S.P.A."). Receipts whose merchant could not be identified in the registry are unaffected and keep the name as read.
+
+- Documentation only, no behavior change:
+  - The deprecated `type` field on `POST /receipt` now states its deprecation date (2.5.0, 2026-06-30) and that it is still accepted and ignored, replacing the stale "30-day window" wording. It will be removed in `4.0.0`, with the usual notice.
+  - The webhook callback on `POST /receipt` now documents the delivery policy: any status below `400` acknowledges the event; `5XX`, `429`, transport errors and timeouts are retried up to 4 attempts with exponential backoff; other `4XX` are not retried.
+  - The `Employees` tag has a description, and the `POST /receipt` request/response examples are wired to the operation (they were defined but never referenced).
+  - Known and deliberately unchanged: `POST /receipt` (singular) vs `GET /receipts/{id}` (plural), and the snake_case `GET /invoices_download/{id}`. Renaming an endpoint is a breaking change and would only happen in a `MAJOR` version with notice.
+
+</Update>
+
+<Update label="3.2.0" description="2026-07-21">
+
+### Added
+
+- `POST /employee` now supports an optional `Idempotency-Key` header (max 255 characters) for safe retries and concurrent submissions: requests carrying the same key create the employee only once. Replays return the original `employee_id` in the same `201` response, with a new optional `replayed: true` field. Callers that don't send the header see no change in behavior.
+- `CreateEmployeeResponse` now documents the `status` field ("success") that the endpoint has always returned, alongside the new optional `replayed` boolean.
+
+</Update>
+
+<Update label="3.1.0" description="2026-07-09">
+
+### Added
+
+- `POST /receipt` is now idempotent for duplicate fiscal receipts: resubmitting a receipt with the same `merchant_vat` + `rt_number` + `receipt_number` + `receipt_date_time` returns `200` with the original `receipt_id`, a new `original_receipt_id`, and `duplicate: true` — instead of creating a second receipt. No new fields are required from clients.
+- New `receipt.conversion.duplicate` webhook event, delivered at most once when a duplicate is detected, carrying the original receipt's id and merchant data. Previously a duplicate surfaced as `receipt.conversion.failed`.
+- New `duplicate` event value on `POST /sandbox/receipts/{id}/trigger` (test API key) so partners can simulate the duplicate webhook in the sandbox; it fires exactly once and ignores `count`.
+- `GET /receipts/{id}` now returns webhook-parity fields so a missed webhook can be recovered by polling: `machine_status` (`completed` | `pending` | `failed` | `duplicate` | `reverted`), `merchant_name`, `merchant_vat`, and `recovered_vat` (present only while the conversion stands). The endpoint is scoped to the partner that owns the API key.
+
+### Fixed
+
+- `GET /receipts/{id}` now determines test vs live from the **API key** instead of a `?type=Test` query parameter. A receipt submitted with a test key (stored in the sandbox) is now retrievable by polling — previously such a call returned `404` — and the endpoint returns the receipt's real status rather than a mock. The `?type=Test` query parameter is deprecated and ignored.
+
+</Update>
+
+<Update label="3.0.0" description="2026-07-01" tags={["Breaking"]}>
+
+### Changed
+
+- **BREAKING:** Test (sandbox) submissions to `POST /receipt` no longer fire any webhook automatically. A test receipt is persisted to the sandbox, but the `receipt.conversion.completed` (and other) callbacks are now driven explicitly from the partner portal (or directly via `POST /sandbox/receipts/{id}/trigger`). Partners that relied on a webhook arriving on test submission must switch to triggering events themselves.
+- Sandbox `receipt.conversion.completed` callbacks now always carry mock `merchant_name`, `merchant_vat`, and `recovered_vat` values (echoing the submitted receipt's stored fields where available, otherwise hardcoded placeholders), so partners can validate handling of those fields end-to-end.
+
+### Removed
+
+- **BREAKING:** Removed the `sandbox_scenario` field and the reserved `merchant_vat` scenario sentinels (`IT0000000000{2..5}`) from `POST /receipt`. Sandbox outcomes are now selected per trigger via `POST /sandbox/receipts/{id}/trigger` (`event`: `completed` | `failed` | `reverted`, with an optional `count`).
+- **BREAKING:** Removed the `payload_variant` field from `POST /receipt`. Payload-shape selection remains available on `POST /sandbox/receipts/{id}/trigger`.
+
+</Update>
+
+<Update label="2.5.0" description="2026-06-30">
+
+### Added
+
+- Sandbox scenario engine on `POST /receipt` (test API key): optional `sandbox_scenario` field (`completed`, `failed`, `unknown_id`, `double_send`, `storno`) to deterministically choose the simulated webhook outcome, plus reserved `merchant_vat` sentinels (`IT0000000000{2..5}`) for clients that cannot set the field.
+- Optional `payload_variant` field on `POST /receipt` (`current` | `expected`) selecting the `receipt.conversion.completed` payload shape; the `expected` variant carries a new `schema_version` field on `WebhookPayload`.
+- `POST /sandbox/receipts/{id}/trigger` endpoint (test API key only) to fire a webhook event (`completed` | `failed` | `reverted`, with an optional `count` for double-send) for an existing sandbox receipt out-of-band — for replays and lifecycle transitions such as storno.
+
+### Changed
+
+- The request environment (Test vs Live) is now derived from the API key — a test key routes to the sandbox, a live key to production. The `type` field on `POST /receipt` is **deprecated**: it is still accepted during a 30-day partner-notice window but ignored for environment-scoped keys, and will be removed in a future `MAJOR` version.
+
+</Update>
+
+<Update label="2.4.0" description="2026-06-23">
+
+### Added
+
+- `receipt.conversion.failed` webhook is now delivered in production. It fires when a receipt is archived — either by staff (e.g. illegible scontrino) or automatically as a duplicate — with the archive reason in the `error` field. Previously this event was documented but never sent.
+
+### Changed
+
+- `recovered_vat` on the `receipt.conversion.completed` webhook now reflects the actual IVA recovered from the receipt (previously always `0`). This includes the mock `completed` webhook fired in `Test` mode, which is now populated with the submitted `merchant_name`/`merchant_vat` and the `recovered_vat` from the request body's `receipt_vat`.
+
+</Update>
+
+<Update label="2.3.0" description="2026-05-20">
+
+### Added
+
+- Optional `email` and `phone_number` fields on `POST /employee` request body (`CreateEmployeeRequest`). Neither field is required for partner integrations; both are stored and returned in `GET /company/{id}` employee listings (`EmployeeSummary`).
+- `merchant_name` and `merchant_vat` fields on the `receipt.conversion.completed` webhook payload, giving partners the supplier ragione sociale and P.IVA for each recovered invoice.
+- `receipt.conversion.completed` webhook now fires for **Live** receipts at the moment the merchant confirms invoice emission (previously fired only for Test receipts).
+- `receipt_image_url` field on `GET /receipts/{id}` responses (both `200` and `202`). Returns the URL of the original receipt image uploaded with `POST /receipt`, or an empty string when no image was uploaded. In `Test` mode (`?type=Test`) a stub URL is returned.
+
+</Update>
+
+<Update label="2.1.0" description="2026-04-29">
+
+### Fixed
+
+- `POST /company` `409 Conflict` response now includes `company_id` when the duplicate VAT number is already registered by the requesting partner, letting partners recover the existing company id without an extra `GET` lookup. The field is omitted when the duplicate belongs to a different partner.
+
+</Update>
+
+<Update label="2.0.0" description="2026-04-27" tags={["Breaking"]}>
+
+> Versions before `2.0.0` were dated rather than numbered. The 2026-04-27 release shipped breaking changes (HTTP status code shifts, type coercion of monetary fields, schema removals) and is retroactively labelled `2.0.0`.
+
+### Added
+
+- `POST /company/{id}/webhook-secret/rotate` endpoint for regenerating a company's `webhook_signing_secret`. Use when the original secret is lost or suspected of being compromised. Returns `409 Conflict` when the company has no `webhook_url` configured.
+- `webhook_signing_secret` is now also returned on `PUT /company/{id}` when the update first sets a `webhook_url` on a company that previously had none, closing the gap where partners who added their webhook after registration had no way to obtain a signing secret.
+- `receipt.conversion.reverted` webhook event: fired with `status: completed` when a credit note is successfully issued after a partner rejects a delivered receipt.
+- `type` field (`Live` or `Test`) on `POST /company`, defaulting to `Live` when omitted. Lets partners register a sandbox `Test` company alongside a `Live` one with the same VAT number without conflict. Also returned on `GET /company/{id}`.
+- End-to-end Test flow on `POST /receipt`. When the request `type` is `Test`, the receipt is not persisted and a signed `receipt.conversion.completed` webhook is fired to the target company's `webhook_url` (if configured) so partners can validate their signature verification and callback handling.
+- `?type=Test` query parameter on `GET /receipts/{id}` — returns a mock completed response without database access, letting partners exercise status polling in test mode with any receipt id.
+
+### Changed
+
+- **BREAKING:** Monetary and quantity fields (`receipt_total`, `receipt_vat`, `product_total`, `product_vat`, `product_quantity`, `product_absolute_discount`, `product_percent_discount`, `invoice_total`) changed from `string` to `number` (float) to match implementation.
+- **BREAKING:** `POST /company` success response changed from `200` to `201 Created`.
+- **BREAKING:** `POST /employee` success response changed from `200` to `201 Created`.
+- `PUT /employee/{id}` now accepts optional `company_id` field for employee reassignment between companies.
+- `GET /receipts/{id}` 404 response now uses standard `ErrorResponse` schema.
+- `GET /invoices_download/{id}` 404 response now uses standard `ErrorResponse` schema.
+
+### Removed
+
+- **BREAKING:** `GetInvoiceStatusErrorResponse` schema (replaced by standard `ErrorResponse`).
+- **BREAKING:** `GetInvoiceFileErrorResponse` schema (replaced by standard `ErrorResponse`).
+
+### Fixed
+
+- `POST /company` no longer returns `409 Conflict` when re-registering a company whose previous record was soft-deleted via `DELETE /company/{id}`. A new company with a new `id` is created. Existing employees and receipts attached to the deleted company are not migrated.
+
+</Update>
+
+<Update label="1.1.0" description="2026-04-16">
+
+### Added
+
+- Webhook signature verification (`x-recivu-signature`) documentation.
+
+</Update>
+
+<Update label="1.0.0">
+
+- Initial public release.
+
+</Update>

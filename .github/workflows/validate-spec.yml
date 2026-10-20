@@ -1,23 +1,15 @@
-# Primo workflow di api-docs (TECH-893). Il repo pubblica su docs.recivu.it a
-# ogni push su main tramite GitHub Pages "deploy from branch": non c'e' una
-# build da bloccare, quindi il check e' bloccante solo sulla PR. Perche' lo sia
-# davvero, `validate-spec` va messo fra i required check della branch
-# protection di main. Sul push resta come segnale: se e' rosso, e' gia' online.
+# Primo workflow di api-docs (TECH-893), spostato in docs con la migrazione a
+# Mintlify. Mintlify builda e pubblica a ogni push su main: un errore nella
+# spec o nell'MDX ferma il deploy, ma il resto (versione non allineata,
+# changelog.mdx non rigenerato) passerebbe in silenzio. Il check e' bloccante
+# solo sulla PR, e perche' lo sia davvero `validate-spec` va messo fra i
+# required check della branch protection di main. Sul push resta come segnale.
 name: validate-spec
 
 on:
   pull_request:
-    paths:
-      - openapi.yaml
-      - CHANGELOG.md
-      - redocly.yaml
-      - scripts/ci/**
-      - .github/workflows/validate-spec.yml
   push:
     branches: [main]
-    paths:
-      - openapi.yaml
-      - CHANGELOG.md
 
 permissions:
   contents: read
@@ -25,7 +17,7 @@ permissions:
 jobs:
   validate-spec:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -38,3 +30,12 @@ jobs:
 
       - name: Versione spec = ultima release del changelog
         run: scripts/ci/check-version-sync.sh openapi.yaml CHANGELOG.md
+
+      - name: changelog.mdx rigenerato da CHANGELOG.md
+        run: node scripts/gen-changelog.mjs --check
+
+      - name: Build Mintlify
+        run: npx -y mint@4 validate
+
+      - name: Link rotti
+        run: npx -y mint@4 broken-links
