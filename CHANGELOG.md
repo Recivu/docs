@@ -15,6 +15,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   - `GET /company/{id}/vehicles` lists the vehicles of a company, most recently created first (`{"vehicles": [...]}`, empty when none).
 - `PATCH /receipt` assigns, changes or removes (`vehicle_id: null`) the vehicle of a receipt. It is allowed only within **24 hours** of the receipt's creation (otherwise `409`), only while the receipt's invoice has **not been requested yet** and the receipt is not converted, discarded or lost (otherwise `409`, with the message `The receipt's vehicle can no longer be assigned, changed or removed: its invoice has already been requested, or the receipt is converted, discarded or lost`; the plate is needed to emit the invoice) only with a vehicle of the receipt's company (otherwise `422`) and only on a **fuel or motorway** receipt (any other category, or a receipt without one, returns `422` with the message `A vehicle can only be assigned to fuel or motorway receipts`; this check wins over the `409`s, and removing the vehicle is allowed whatever the category); the receipt is left unchanged on any error. Callers that don't use these endpoints see no change in behavior.
 
+### Changed
+
+- **BREAKING:** company VAT numbers are stored and returned in canonical form, `IT` followed by 11 digits. A company registered with the bare 11 digits (`07280260485`) is returned by `GET /company/{id}` and `GET /companies` as `IT07280260485`, including companies registered before this release. `POST /company` and `PUT /company/{id}` still accept the bare form and store it with the prefix, and the `vat_number` filter of `GET /companies` matches either form. If you compare the VAT number you sent with the one we return, compare the canonical form.
+- **BREAKING:** `POST /company` returns `409` only when you have already registered a company with the same VAT number and `type`, compared in canonical form. A company registered by a different partner no longer conflicts: the request now returns `201` with a new company owned by you. `DuplicateCompanyResponse.company_id` is therefore always present.
+
 ## [3.4.0] - 2026-09-19
 
 ### Added
